@@ -43,8 +43,10 @@ app.use((req, res, next) => {
 // middleware function to check for logged-in users
 var sessionChecker = (req, res, next) => {
     if (req.session.user && req.cookies.user_sid) {
-        res.redirect('/Dashboard');
-		
+		if(req.session.user.type=="Faculty")
+			res.redirect('/Dashboard');
+		else
+			res.redirect('/StudentDashboard');
     } else {
         next();
     }    
@@ -85,20 +87,79 @@ app.get('/TestCreate',(req,res)=>{
 	}
 });
 app.get('/AddQuestions',(req,res)=>{
-	if (req.session.user && req.cookies.user_sid) {
-		res.render('testcreation_step2');
+	if (req.session.user && req.cookies.user_sid && req.cookies["id"] && req.session.user.type=="Faculty") {
+		MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
+		console.log("Inside Add Questions \nAdding Data to :- \n");
+
+		const db = client.db(dbName);
+		const collection = db.collection('tests');
+		var mongo = require('mongodb');
+		var id=new mongo.ObjectID(req.cookies["id"]);
+		collection.find({_id:id}).toArray(function(err,docs)
+		{
+			console.log(docs);
+			res.render('testcreation_step2',{data:docs});
+
+		});	
+		client.close();
+		res.clearCookie("id");
+	});
+
 	}
 	else
 	{
-		 res.redirect('/login');
+		 res.redirect('/Dashboard');
 	}
-	
-	
+
+
 });
+
+app.get('/StudentDashboard',(req,res)=>{
+	if (req.session.user && req.cookies.user_sid && req.session.user.type=="Student") {
+	res.render('StudentDashboard');
+	}
+	else
+	{
+		res.redirect('/login');
+	}
+});
+
 app.get('/Dashboard',(req,res)=>{
-	if (req.session.user && req.cookies.user_sid) {
+	if (req.session.user && req.cookies.user_sid && req.session.user.type=="Faculty") {
+		MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
+		console.log("Opening Dashboard...");
+		res.clearCookie("id");
+		const db = client.db(dbName);
+		var email=req.session.user.Email;
+			var data=[];
+			console.log(email);
+				var d = new Date(),
+					month = '' + (d.getMonth() + 1),
+					day = '' + d.getDate(),
+					year = d.getFullYear();
+			
+				if (month.length < 2) month = '0' + month;
+				if (day.length < 2) day = '0' + day;
+			
+				var date_1=[year, month, day].join('-');
+				console.log(date_1);
+			
+			db.collection('Examiners').findOne({Email: req.session.user.Email},
+				function(err,docs)
+				{
+					console.log(docs);
+					data=docs;
+				});
+			
+				db.collection('tests').find({Examiner_id: req.session.user.Email}).toArray
+				(function(err,docs)
+				{
+					console.log(docs);
+					res.render('dashboard',{data,data1:docs,date_1});
+				});
+				
 		
-		res.render('dashboard');
+	});
 	}
 	else
 	{
@@ -121,8 +182,8 @@ app.get('/logout', (req, res) => {
 
 app.post('/RegisterExaminer',(req,res)=>{
 	MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
-		console.log("server is connected");
-		
+		console.log("Registration of Examiner...");
+
 		const db = client.db(dbName);
 		const collection = db.collection('Examiners');
 		collection.insertOne(
@@ -133,24 +194,67 @@ app.post('/RegisterExaminer',(req,res)=>{
 				/*EmailId : req.param('TxtEmailId', null),
 				Password : req.param('TxtPassword', null)*/
 			},function(err,result){
-				res.redirect('/MemberRecordsExaminers');
+
+				res.redirect('/login');
 		});
-		
-	
+
+
 	});
 
 });
 
+app.get('/SaveExaminerProfile',(req,res)=>{
+	if (req.session.user && req.cookies.user_sid && req.session.user.type=="Faculty") {
+		res.clearCookie("id");
+		res.render('register_examiner');
+	}
+	else
+	{
+		 res.redirect('/login');
+	}
+});
+
+app.post('/SaveExaminerProfile',(req,res)=>{
+	MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
+		console.log("Edit Profile of Examiner...");
+		const db = client.db(dbName);
+		const collection = db.collection('Examiners');
+		var mongo = require('mongodb');
+		var id=new mongo.ObjectID(req.session.user._id);
+		console.log(req.session.user._id);
+		collection.updateOne(
+				{_id: id},
+				{$set:{
+					InstituteName: req.param('InstName', null),
+					InstituteType: req.param('insttype', null),
+					InstituteAddress: req.param('Address', null),
+					InstituteCountry: req.param('conttype', null),
+					ExaminerContact: req.param('Contact',null)
+				}}
+			, function(err, result){
+				if(err)	throw error;
+			});
+		res.redirect('/Dashboard');
+	});
+
+});
+
+
+app.post('/AddQuestionRedirect',(req,res)=>{
+	res.cookie("id",req.param('test_id',null));
+	console.log(req.param('test_id',null));
+	res.redirect('/AddQuestions');
+});
+
 app.post('/TestCreate',(req,res)=>{
 	MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
-		console.log("server is connected");
-		
+		console.log("Inside test Creation...");
+
 		const db = client.db(dbName);
 		const collection = db.collection('tests');
 		collection.insertOne(
 			{
 				//Name: req.param('ExmUsrName', null),
-			
 				Examiner_id:req.session.user.Email,
 				Test_title:req.param('TestTitle', null),
 				Subject:req.param('TestSubject', null),
@@ -173,25 +277,27 @@ app.post('/TestCreate',(req,res)=>{
 						}
 					}
 				}*/
-					
-				
+
+
 			},function(err,result){
+				//console.log(result.insertedId);
+				res.cookie("id",result.insertedId);
 				res.redirect('/AddQuestions');
 		});
 		collection.find({}).toArray(function(err,docs)
 		{
-			console.log(docs);
+			//console.log(docs);
 		});
-	
+
 	});
 
 });
 
+
 app.get('/LoginExaminer', sessionChecker,(req,res)=>{
+	res.clearCookie("id");
 	res.render('login');
 });
-
-
 
 app.post('/LoginExaminer',(req,res)=>{
 	MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
@@ -213,8 +319,9 @@ app.post('/LoginExaminer',(req,res)=>{
             } else {
             
 			req.session.user = user;
+			req.session.user.type = "Faculty";
 			console.log(req.session.user);
-			var email=req.param('ExmUsrEmail',null);
+			/*var email=req.param('ExmUsrEmail',null);
 			var data=[];
 			console.log(email);
 				var d = new Date(),
@@ -241,23 +348,22 @@ app.post('/LoginExaminer',(req,res)=>{
 					console.log(docs);
 					res.render('dashboard',{data,data1:docs,date_1});
 				});
-			//res.render('dashboard',{email});
-			//res.redirect('/Dashboard',{email});
+			//res.render('dashboard',{email});*/
+			res.redirect('/Dashboard');
           }
 	});
 			
 	});
 
 });
-	
 app.get('/RegisterStudent',(req,res)=>{
 	res.render('register');
 });
 
 app.post('/RegisterStudent',(req,res)=>{
 	MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
-		console.log("server is connected");
-		
+		console.log("Inside Registration of Student..");
+
 		const db = client.db(dbName);
 		const collection = db.collection('Students');
 		collection.insertOne(
@@ -265,12 +371,12 @@ app.post('/RegisterStudent',(req,res)=>{
 				Name: req.param('StdUsrName', null),
 				Email : req.param('StdUsrEmail', null),
 				Password : req.param('StdUsrPass', null),
-				
+
 			},function(err,result){
-				res.redirect('/MemberRecordsStudents');
+				res.redirect('/StudentDashboard');
 		});
-		
-	
+
+
 	});
 
 });
@@ -280,27 +386,30 @@ app.get('/LoginStudent',(req,res)=>{
 
 app.post('/LoginStudent',(req,res)=>{
 	MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
-		console.log("Trying to Login");
-		
+		console.log("Trying to Login...");
+
 		const db = client.db(dbName);
-		
+
 		db.collection('Students').findOne({
 				$and:
 				[	
 					{Email : req.param('StdUsrEmail', null)},
 					{Password : req.param('StdUsrPass', null)}
 				]
-				
+
 			}, function(err, user) {
              if(user ===null){
                res.end("Login invalid");
 			   console.log("Login Invaild");
             } else {
-            console.log(user);
-            res.end("Login valid");
+				req.session.user = user;
+			req.session.user.type = "Student";
+			console.log(req.session.user);
+            console.log(req.session.user.type);
+            res.redirect('StudentDashboard');
           }
 	});
-			
+
 	});
 
 });
@@ -308,15 +417,15 @@ app.post('/LoginStudent',(req,res)=>{
 
 app.get('/MemberRecordsExaminers',(req,res)=>{
 	MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
-		console.log("server is connected");
-		
+		console.log("Printing Data of Member Records Examiners");
+
 		const db = client.db(dbName);
 		const collection = db.collection('Examiners');
 		collection.find({}).toArray(function(err,docs)
 		{
 			console.log(docs);
 			res.render('MemberRecordsExaminers',{data:docs});
-		
+
 		});	
 		client.close();
 	});
@@ -325,27 +434,25 @@ app.get('/MemberRecordsExaminers',(req,res)=>{
 
 app.get('/MemberRecordsStudents',(req,res)=>{
 	MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
-		console.log("server is connected");
-		
+		console.log("Printing Data of Member Records Students");
+
 		const db = client.db(dbName);
 		const collection = db.collection('Students');
 		collection.find({}).toArray(function(err,docs)
 		{
 			console.log(docs);
 			res.render('MemberRecordsStudents',{data:docs});
-		
+
 		});	
 		client.close();
 	});
 })
 
-
-
 //Showing Data on Terminal...
 app.get('/showtests',(req,res)=>{
 	MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
 		console.log("Showing tests");
-		
+
 		const db = client.db(dbName);
 		const collection = db.collection('tests');
 		collection.find({}).toArray(function(err,docs)
@@ -355,6 +462,110 @@ app.get('/showtests',(req,res)=>{
 		client.close();
 	});
 })
+
+
+
+app.post('/AddQuestions',(req,res)=>{
+
+	MongoClient.connect(url,{ useNewUrlParser: true },function(err,client){
+		console.log("Inside Adding Questions");
+		//var yo=
+		//console.log(req.param('question_0', null));
+		const db = client.db(dbName);
+		const collection = db.collection('tests');
+		var mongo = require('mongodb');
+		var id=new mongo.ObjectID(req.cookies["id"]);
+		var qns=parseInt(req.query.qns);
+		//var qns=2;
+		console.log(qns);
+		for(var i=0;i<=qns;i++)
+		{
+			console.log("Loop Started");
+
+			var select =req.param('select_'+i, null);
+			console.log("Adding Question with options "+select);
+			if(select==null)
+			{
+				continue;
+			}
+			else if(select==2)
+			{
+
+				collection.updateOne({_id:id}, {$push:{
+
+					questions:
+					{
+						question:
+						{
+							value:req.param('question_'+i, null),
+							options:
+							{
+								A:
+								{
+									value:req.param('option_1_'+i, null),
+									correct:req.param('ACorrect_'+i, null)
+								},
+								B:
+								{
+									value:req.param('option_2_'+i, null),
+									correct:req.param('BCorrect_'+i, null)
+								}
+							}
+						}
+					}
+
+				}});
+			}
+			else
+			{
+				collection.updateOne({_id:id}, {$push:{
+
+					questions:
+					{
+						question:
+						{
+							value:req.param('question_'+i, null),
+							options:
+							{
+								A:
+								{
+									value:req.param('option_1_'+i, null),
+									correct:req.param('ACorrect_'+i, null)
+								},
+								B:
+								{
+									value:req.param('option_2_'+i, null),
+									correct:req.param('BCorrect_'+i, null)
+								},
+								C:
+								{
+									value:req.param('option_3_'+i, null),
+									correct:req.param('CCorrect_'+i, null)
+								},
+								D:
+								{
+									value:req.param('option_4_'+i, null),
+									correct:req.param('DCorrect_'+i, null)
+								}
+							}
+						}
+					}
+
+				}});
+			}
+		}
+
+		console.log("Questions Added redirected to Dashboard !!");
+		res.clearCookie("id");
+		res.redirect('/Dashboard');
+
+
+		client.close();
+	});
+
+});
+
+
 
 
 //Httpserver Port Number 3000.
